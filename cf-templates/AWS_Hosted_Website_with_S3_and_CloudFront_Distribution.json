@@ -95,25 +95,7 @@
                     "Comment": "CDN for S3-backed website", 
                     "Aliases": [
                         {
-                            "Fn::Join": [
-                                "", 
-                                [
-                                    {
-                                        "Ref": "AWS::StackName"
-                                    }, 
-                                    {
-                                        "Ref": "AWS::AccountId"
-                                    }, 
-                                    ".", 
-                                    {
-                                        "Ref": "AWS::Region"
-                                    }, 
-                                    ".", 
-                                    {
-                                        "Ref": "HostedZone"
-                                    }
-                                ]
-                            ]
+                            "Ref": "HostedZone"
                         }
                     ], 
                     "Enabled": "true", 
@@ -133,23 +115,7 @@
                                 "OriginProtocolPolicy": "http-only"
                             }, 
                             "DomainName": {
-                                "Fn::Join": [
-                                    "", 
-                                    [
-                                        {
-                                            "Ref": "S3BucketForWebsiteContent"
-                                        }, 
-                                        {
-                                            "Fn::FindInMap": [
-                                                "Region2S3WebsiteSuffix", 
-                                                {
-                                                    "Ref": "AWS::Region"
-                                                }, 
-                                                "Suffix"
-                                            ]
-                                        }
-                                    ]
-                                ]
+                                "Fn::Join": ["", [{"Ref":"S3BucketForWebsiteContent"}, ".s3-website-", {"Ref": "AWS::Region"}, ".amazonaws.com"]]
                             }, 
                             "Id": "only-origin"
                         }
