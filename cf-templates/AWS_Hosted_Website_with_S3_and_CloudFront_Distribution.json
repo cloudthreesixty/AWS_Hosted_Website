@@ -42,7 +42,17 @@
         "S3BucketForLogs": {
             "Type": "AWS::S3::Bucket", 
             "Properties": {
-                "AccessControl": "LogDeliveryWrite"
+                "AccessControl": "LogDeliveryWrite",
+                "LifecycleConfiguration": {
+                  "Rules": [
+                    {
+                      "Id": "DeleteEverythingInThreeMonths",
+                      "Prefix": "",
+                      "Status": "Enabled",
+                      "ExpirationInDays": "90"
+                    }
+                  ]
+                }
             }
         },
 
@@ -67,7 +77,7 @@
                 "AccessControl": "PublicRead", 
                 "LoggingConfiguration": {
                     "DestinationBucketName" : { "Ref": "S3BucketForLogs" },
-                    "LogFilePrefix" : "s3-website-logs/"
+                    "LogFilePrefix" : "s3-redirect-logs/"
                 },
                 "WebsiteConfiguration": {
                     "RedirectAllRequestsTo": {
