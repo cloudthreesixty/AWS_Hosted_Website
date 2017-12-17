@@ -142,6 +142,12 @@
                         "AcmCertificateArn": {"Ref":"CertificateArn"},
                         "SslSupportMethod": "sni-only"
                     },
+                    "Restrictions" : {
+                        "GeoRestriction" : {
+                            "RestrictionType" : "whitelist",
+                            "Locations" : [ "GB", "AU", "CA", "FK", "GI", "VG", "IE", "IM", "JE", "KY", "NZ", "PR", "US", "VI", "ZA", "CY", "BE", "BB", "BG", "BM", "BS", "CH", "DK", "ES", "FI", "FR", "GL", "GR", "IS", "IT", "LU", "NO", "PT" ]
+                        }
+                    },
                     "Logging": {
                         "IncludeCookies": "true",
                         "Bucket": {
@@ -198,7 +204,6 @@
                   "Action": ["s3:DeleteObject", "s3:GetObject", "s3:PutObject", "s3:PutObjectAcl"],
                   "Effect": "Allow",
                   "Resource": [
-                        { "Fn::Join": ["", ["arn:aws:s3:::", { "Ref": "S3BucketForWebsiteContent" }, "/*" ]]},
                         { "Fn::Join": ["", [ { "Fn::GetAtt": [ "S3BucketForWebsiteContent",  "Arn" ] }, "/*" ]]},
                         { "Fn::Join": ["", [ { "Fn::GetAtt": [ "S3BucketForWebsiteContent",  "Arn" ] } ]]}
                     ]
