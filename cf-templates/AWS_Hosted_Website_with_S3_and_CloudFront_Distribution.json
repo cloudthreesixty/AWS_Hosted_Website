@@ -17,6 +17,18 @@
             "AllowedPattern": "arn[a-z0-9-:\/]*", 
             "ConstraintDescription": "must be a valid Certificate ARN."
         },
+        "AltHostedZone": {
+            "Type": "String", 
+            "Description": "The DNS name of an existing Amazon Route 53 hosted zone, alternative to the main (.co.uk)", 
+            "AllowedPattern": "(?!-)[a-zA-Z0-9-.]{1,63}(?<!-)", 
+            "ConstraintDescription": "must be a valid DNS zone name."
+        },
+        "AltCertificateArn": {
+            "Type": "String", 
+            "Description": "The Arn of an existing ACM certificate, for the alternative domain (.co.uk)", 
+            "AllowedPattern": "arn[a-z0-9-:\/]*", 
+            "ConstraintDescription": "must be a valid Certificate ARN."
+        },
         "DeployAccount": {
             "Type": "String",
             "AllowedValues": ["true", "false"],
@@ -106,7 +118,6 @@
                         "TargetOriginId": { "Fn::Join": ["", ["www.", {"Ref":"HostedZone"}]] }, 
                         "ViewerProtocolPolicy": "redirect-to-https"
                     }, 
-                    "DefaultRootObject": "index.html", 
                     "Origins": [
                         {
                             "CustomOriginConfig": {
@@ -137,6 +148,61 @@
                             "Fn::Join": ["", [{"Ref":"S3BucketForLogs"}, ".s3.amazonaws.com"]]
                         },
                         "Prefix": "cloudfront-www-redirect-logs"
+                    }
+                }
+            }
+        }, 
+        "WebsiteAltCDN": {
+            "Type": "AWS::CloudFront::Distribution", 
+            "Properties": {
+                "DistributionConfig": {
+                    "Comment": "CDN for S3-backed website", 
+                    "Aliases": [
+                        {
+                            "Ref": "AltHostedZone"
+                        },
+                        { 
+                            "Fn::Join": ["", ["www.", {"Ref":"AltHostedZone"}]] 
+                        }
+                    ], 
+                    "Enabled": "true", 
+                    "DefaultCacheBehavior": {
+                        "ForwardedValues": {
+                            "QueryString": "true"
+                        }, 
+                        "TargetOriginId": { "Ref": "AltHostedZone" }, 
+                        "ViewerProtocolPolicy": "redirect-to-https"
+                    }, 
+                    "Origins": [
+                        {
+                            "CustomOriginConfig": {
+                                "HTTPPort": "80", 
+                                "HTTPSPort": "443", 
+                                "OriginProtocolPolicy": "http-only"
+                            }, 
+                            "DomainName": {
+                                "Fn::Join": ["", [{"Ref":"S3BucketForWWWRedirect"}, ".s3-website-", {"Ref": "AWS::Region"}, ".amazonaws.com"]]
+                            },
+                            "Id":  { "Ref": "AltHostedZone" }
+                        }
+                    ],
+                    "PriceClass": "PriceClass_100",
+                    "ViewerCertificate" : {
+                        "AcmCertificateArn": {"Ref":"AltCertificateArn"},
+                        "SslSupportMethod": "sni-only"
+                    },
+                    "Restrictions" : {
+                        "GeoRestriction" : {
+                            "RestrictionType" : "whitelist",
+                            "Locations" : [ "GB", "AU", "CA", "FK", "GI", "VG", "IE", "IM", "JE", "KY", "NZ", "PR", "US", "VI", "ZA", "CY", "BE", "BB", "BG", "BM", "BS", "CH", "DK", "ES", "FI", "FR", "GL", "GR", "IS", "IT", "LU", "NO", "PT" ]
+                        }
+                    },
+                    "Logging": {
+                        "IncludeCookies": "true",
+                        "Bucket": {
+                            "Fn::Join": ["", [{"Ref":"S3BucketForLogs"}, ".s3.amazonaws.com"]]
+                        },
+                        "Prefix": "cloudfront-website-alt-logs"
                     }
                 }
             }
@@ -188,7 +254,6 @@
                         "TargetOriginId": { "Ref": "HostedZone" }, 
                         "ViewerProtocolPolicy": "redirect-to-https"
                     }, 
-                    "DefaultRootObject": "index.html", 
                     "Origins": [
                         {
                             "CustomOriginConfig": {
@@ -253,6 +318,64 @@
                 }
             }
         },
+        "WebsiteAltDNSName": {
+            "Type": "AWS::Route53::RecordSet", 
+            "Properties": {
+                "HostedZoneName": {
+                    "Fn::Join": [
+                        "", 
+                        [
+                            {
+                                "Ref": "AltHostedZone"
+                            }, 
+                            "."
+                        ]
+                    ]
+                }, 
+                "Comment": "ALIAS to CloudFront distribution", 
+                "Name": {
+                    "Ref": "AltHostedZone"
+                }, 
+                "Type": "A", 
+                "AliasTarget" : {
+                    "HostedZoneId" : "Z2FDTNDATAQYW2",
+                    "DNSName" : {
+                                    "Fn::GetAtt": [
+                                        "WebsiteAltCDN", 
+                                        "DomainName"
+                                    ]
+                                }
+                }
+            }
+        },
+        "WebsiteWWWAltName": {
+            "Type": "AWS::Route53::RecordSet", 
+            "Properties": {
+                "HostedZoneName": {
+                    "Fn::Join": [
+                        "", 
+                        [
+                            {
+                                "Ref": "AltHostedZone"
+                            }, 
+                            "."
+                        ]
+                    ]
+                }, 
+                "Comment": "ALIAS to CloudFront distribution", 
+                "Name": { "Fn::Join": ["", ["www.", {"Ref":"AltHostedZone"}]] },
+                "Type": "A", 
+                "AliasTarget" : {
+                    "HostedZoneId" : "Z2FDTNDATAQYW2",
+                    "DNSName" : {
+                                    "Fn::GetAtt": [
+                                        "WebsiteAltCDN", 
+                                        "DomainName"
+                                    ]
+                                }
+                }
+            }
+        },
 
         "DeployUser": {
           "Type": "AWS::IAM::User",
@@ -305,31 +428,31 @@
         }
     }, 
     "Outputs": {
-    "CloudfrontURL": {
-      "Value": {
-        "Fn::GetAtt": [ "WebsiteCDN", "DomainName" ]
-      },
-      "Description": "URL for Cloudfront distribution"
-    },
-    "S3BucketForWebsiteContent": {
-      "Value": {
-        "Ref": "S3BucketForWebsiteContent"
-      },
-      "Description": "S3 bucket where website content is stored"
-    },
-    "DeployAccessId": {
-      "Value": {
-        "Ref": "DeployAccessKeys"
-      },
-      "Condition": "CreateDeployAccount",
-      "Description": "AWS Access ID"
-    },
-    "DeploySecretKey": {
-      "Value": {
-        "Fn::GetAtt": ["DeployAccessKeys", "SecretAccessKey"]
-      },
-      "Condition": "CreateDeployAccount",
-      "Description": "AWS Secret Key"
-    }
+        "CloudfrontURL": {
+          "Value": {
+            "Fn::GetAtt": [ "WebsiteCDN", "DomainName" ]
+          },
+          "Description": "URL for Cloudfront distribution"
+        },
+        "S3BucketForWebsiteContent": {
+          "Value": {
+            "Ref": "S3BucketForWebsiteContent"
+          },
+          "Description": "S3 bucket where website content is stored"
+        },
+        "DeployAccessId": {
+          "Value": {
+            "Ref": "DeployAccessKeys"
+          },
+          "Condition": "CreateDeployAccount",
+          "Description": "AWS Access ID"
+        },
+        "DeploySecretKey": {
+          "Value": {
+            "Fn::GetAtt": ["DeployAccessKeys", "SecretAccessKey"]
+          },
+          "Condition": "CreateDeployAccount",
+          "Description": "AWS Secret Key"
+        }
     }
 }
