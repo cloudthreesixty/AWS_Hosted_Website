@@ -16,6 +16,17 @@
             "Description": "The Arn of an existing ACM certificate", 
             "AllowedPattern": "arn[a-z0-9-:\/]*", 
             "ConstraintDescription": "must be a valid Certificate ARN."
+        },
+        "DeployAccount": {
+            "Type": "String",
+            "AllowedValues": ["true", "false"],
+            "Default": "true",
+            "Description": "IAM user with permissions to upload files to S3 bucket. Useful if you're using CI to build websites"
+        },
+        "DeployIPrestriction": {
+            "Description": "Comma-delimited list of allowed IP addresss for DeployAccess",
+            "Type": "CommaDelimitedList",
+            "Default": "82.24.51.0/24"
         }
     }, 
     "Mappings": {
@@ -64,6 +75,12 @@
             }
         }
     }, 
+
+    "Conditions": {
+        "CreateDeployAccount": {
+            "Fn::Equals": [{"Ref": "DeployAccount"}, "true"]
+        }
+    },
     "Resources": {
 
         "S3BucketForLogs": {
@@ -77,13 +94,13 @@
             "Type": "AWS::S3::Bucket", 
             "Properties": {
                 "AccessControl": "PublicRead", 
-                "WebsiteConfiguration": {
-                    "IndexDocument": "index.html", 
-                    "ErrorDocument": "error.html"
-                },
                 "LoggingConfiguration": {
                     "DestinationBucketName" : { "Ref": "S3BucketForLogs" },
                     "LogFilePrefix" : "s3-website-logs/"
+                },
+                "WebsiteConfiguration": {
+                    "IndexDocument": "index.html",
+                    "ErrorDocument": "error.html"
                 }
             }
         }, 
@@ -103,8 +120,8 @@
                         "ForwardedValues": {
                             "QueryString": "true"
                         }, 
-                        "TargetOriginId": "only-origin", 
-                        "ViewerProtocolPolicy": "allow-all"
+                        "TargetOriginId": { "Ref": "HostedZone" }, 
+                        "ViewerProtocolPolicy": "redirect-to-https"
                     }, 
                     "DefaultRootObject": "index.html", 
                     "Origins": [
@@ -116,10 +133,22 @@
                             }, 
                             "DomainName": {
                                 "Fn::Join": ["", [{"Ref":"S3BucketForWebsiteContent"}, ".s3-website-", {"Ref": "AWS::Region"}, ".amazonaws.com"]]
-                            }, 
-                            "Id": "only-origin"
+                            },
+                            "Id":  { "Ref": "HostedZone" }
                         }
-                    ]
+                    ],
+                    "PriceClass": "PriceClass_100",
+                    "ViewerCertificate" : {
+                        "AcmCertificateArn": {"Ref":"CertificateArn"},
+                        "SslSupportMethod": "sni-only"
+                    },
+                    "Logging": {
+                        "IncludeCookies": "true",
+                        "Bucket": {
+                            "Fn::Join": ["", [{"Ref":"S3BucketForLogs"}, ".s3.amazonaws.com"]]
+                        },
+                        "Prefix": "cloudfront-website-logs"
+                    }
                 }
             }
         }, 
@@ -137,69 +166,100 @@
                         ]
                     ]
                 }, 
-                "Comment": "CNAME redirect custom name to CloudFront distribution", 
+                "Comment": "ALIAS to CloudFront distribution", 
                 "Name": {
-                    "Fn::Join": [
-                        "", 
-                        [
-                            {
-                                "Ref": "AWS::StackName"
-                            }, 
-                            {
-                                "Ref": "AWS::AccountId"
-                            }, 
-                            ".", 
-                            {
-                                "Ref": "AWS::Region"
-                            }, 
-                            ".", 
-                            {
-                                "Ref": "HostedZone"
-                            }
-                        ]
-                    ]
+                    "Ref": "HostedZone"
                 }, 
-                "Type": "CNAME", 
-                "TTL": "900", 
-                "ResourceRecords": [
-                    {
-                        "Fn::Join": [
-                            "", 
-                            [
-                                "http://", 
-                                {
+                "Type": "A", 
+                "AliasTarget" : {
+                    "HostedZoneId" : "Z2FDTNDATAQYW2",
+                    "DNSName" : {
                                     "Fn::GetAtt": [
                                         "WebsiteCDN", 
                                         "DomainName"
                                     ]
                                 }
-                            ]
-                        ]
-                    }
-                ]
+                }
             }
+        },
+
+        "DeployUser": {
+          "Type": "AWS::IAM::User",
+          "Condition": "CreateDeployAccount",
+          "Properties": {
+            "Path": "/deploy/",
+            "Policies": [{
+              "PolicyName": {
+                "Fn::Join": ["", ["APP-ACCESS-TO-S3-RW-", {"Ref":"S3BucketForWebsiteContent"}]]
+              },
+              "PolicyDocument": {
+                "Version": "2012-10-17",
+                "Statement": [{
+                  "Action": ["s3:DeleteObject", "s3:GetObject", "s3:PutObject", "s3:PutObjectAcl"],
+                  "Effect": "Allow",
+                  "Resource": [
+                        { "Fn::Join": ["", ["arn:aws:s3:::", { "Ref": "S3BucketForWebsiteContent" }, "/*" ]]},
+                        { "Fn::Join": ["", [ { "Fn::GetAtt": [ "S3BucketForWebsiteContent",  "Arn" ] }, "/*" ]]},
+                        { "Fn::Join": ["", [ { "Fn::GetAtt": [ "S3BucketForWebsiteContent",  "Arn" ] } ]]}
+                    ]
+                }, {
+                  "Action": ["s3:ListBucket"],
+                  "Effect": "Allow",
+                  "Resource": { "Fn::Join": ["", ["arn:aws:s3:::", { "Ref": "S3BucketForWebsiteContent" }]]}
+                }, {
+                  "Action": ["s3:ListAllMyBuckets"],
+                  "Effect": "Allow",
+                  "Resource": "*"
+                }, {
+                  "Action": ["cloudfront:CreateInvalidation", "cloudfront:ListDistributions", "cloudfront:GetDistribution", "cloudfront:UpdateDistribution"],
+                  "Effect": "Allow",
+                  "Resource": "*"
+                }, {
+                  "Effect": "Deny",
+                  "Action": "*",
+                  "Resource": "*",
+                  "Condition": {"NotIpAddress": {"aws:SourceIp": { "Ref": "DeployIPrestriction" }}}
+                }]
+              }
+            }]
+          }
+        },
+        "DeployAccessKeys": {
+          "Type": "AWS::IAM::AccessKey",
+          "Condition": "CreateDeployAccount",
+          "Properties": {
+            "UserName": {
+              "Ref": "DeployUser"
+            }
+          }
         }
     }, 
     "Outputs": {
-        "WebsiteURL": {
-            "Value": {
-                "Fn::Join": [
-                    "", 
-                    [
-                        "http://", 
-                        {
-                            "Ref": "WebsiteDNSName"
-                        }
-                    ]
-                ]
-            }, 
-            "Description": "The URL of the newly created website"
-        }, 
-        "BucketName": {
-            "Value": {
-                "Ref": "S3BucketForWebsiteContent"
-            }, 
-            "Description": "Name of S3 bucket to hold website content"
-        }
+    "CloudfrontURL": {
+      "Value": {
+        "Fn::GetAtt": [ "WebsiteCDN", "DomainName" ]
+      },
+      "Description": "URL for Cloudfront distribution"
+    },
+    "S3BucketForWebsiteContent": {
+      "Value": {
+        "Ref": "S3BucketForWebsiteContent"
+      },
+      "Description": "S3 bucket where website content is stored"
+    },
+    "DeployAccessId": {
+      "Value": {
+        "Ref": "DeployAccessKeys"
+      },
+      "Condition": "CreateDeployAccount",
+      "Description": "AWS Access ID"
+    },
+    "DeploySecretKey": {
+      "Value": {
+        "Fn::GetAtt": ["DeployAccessKeys", "SecretAccessKey"]
+      },
+      "Condition": "CreateDeployAccount",
+      "Description": "AWS Secret Key"
+    }
     }
 }
